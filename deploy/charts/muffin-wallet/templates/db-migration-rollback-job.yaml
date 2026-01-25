@@ -1,0 +1,34 @@
+{{- if .Values.migrations.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "muffin-wallet.fullname" . }}-db-rollback
+  labels:
+    app: {{ include "muffin-wallet.name" . }}
+  annotations:
+    "helm.sh/hook": pre-rollback
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      containers:
+        - name: liquibase-rollback
+          image: "{{ .Values.migrations.image.repository }}:{{ .Values.migrations.image.tag }}"
+          env:
+            - name: LIQUIBASE_COMMAND_URL
+              value: "{{ .Values.applicationConfig.spring.datasource.url }}"
+            - name: LIQUIBASE_COMMAND_USERNAME
+              value: "{{ .Values.applicationConfig.spring.datasource.username }}"
+            - name: LIQUIBASE_COMMAND_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "muffin-wallet.secretName" . }}
+                  key: SPRING_DATASOURCE_PASSWORD
+          command: [ "liquibase" ]
+          args:
+            - "--changelog-file=changelog/db.changelog-master.yaml"
+            - "rollback"
+            - "{{ .Values.migrations.dbTag }}"
+      restartPolicy: Never
+{{- end }}

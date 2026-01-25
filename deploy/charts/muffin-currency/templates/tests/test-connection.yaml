@@ -1,0 +1,17 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: "{{ include "muffin-currency.fullname" . }}-test-connection"
+  labels:
+    app: {{ include "muffin-currency.name" . }}
+  annotations:
+    "helm.sh/hook": test
+spec:
+  template:
+    spec:
+      containers:
+        - name: wget
+          image: busybox
+          command: ['wget']
+          args: ['{{ include "muffin-currency.fullname" . }}:{{ .Values.service.port }}{{ .Values.probes.liveness.path }}']
+      restartPolicy: Never

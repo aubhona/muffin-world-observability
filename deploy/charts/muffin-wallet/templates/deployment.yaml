@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "muffin-wallet.fullname" . }}
+  labels:
+    {{- include "muffin-wallet.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+{{ include "muffin-wallet.selectorLabels" . | indent 6 }}
+  template:
+    metadata:
+      labels:
+{{ include "muffin-wallet.selectorLabels" . | indent 8 }}
+    spec:
+      volumes:
+        - name: application-config-volume
+          configMap:
+            name: {{ include "muffin-wallet.fullname" . }}
+      containers:
+        - name: muffin-wallet
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.containerPort }}
+          volumeMounts:
+            - name: application-config-volume
+              mountPath: /app/config
+          envFrom:
+            - secretRef:
+                name: {{ include "muffin-wallet.secretName" . }}
+            - configMapRef:
+                name: {{ include "muffin-wallet.envConfigMapName" . }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.probes.liveness.path }}
+              port: {{ .Values.containerPort }}
+            initialDelaySeconds: {{ .Values.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.liveness.periodSeconds }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.probes.readiness.path }}
+              port: {{ .Values.containerPort }}
+            initialDelaySeconds: {{ .Values.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.probes.readiness.periodSeconds }}

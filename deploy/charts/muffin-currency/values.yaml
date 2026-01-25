@@ -1,0 +1,23 @@
+replicaCount: 2
+
+image:
+  repository: aadan1lov/muffin-currency
+  tag: "1.0.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8083
+  targetPort: 8080
+
+containerPort: 8080
+
+probes:
+  liveness:
+    path: /rate?from=PLAIN&to=CHOKOLATE
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  readiness:
+    path: /rate?from=PLAIN&to=CHOKOLATE
+    initialDelaySeconds: 2
+    periodSeconds: 5
