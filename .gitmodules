@@ -1,0 +1,6 @@
+[submodule "muffin-currency"]
+	path = muffin-currency
+	url = git@github.com:aubhona/muffin-currency.git
+[submodule "muffin-wallet"]
+	path = muffin-wallet
+	url = git@github.com:aubhona/muffin-wallet.git
