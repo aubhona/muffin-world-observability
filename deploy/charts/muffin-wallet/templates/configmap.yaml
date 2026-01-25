@@ -20,9 +20,15 @@ data:
       endpoints:
         web:
           exposure:
-            include: health, info
+            include: health, info, prometheus
       endpoint:
         health:
           probes:
             enabled: true
           show-details: always
+      metrics:
+        distribution:
+          percentiles-histogram:
+            http.server.requests: true
+          slo:
+            http.server.requests: 10ms, 50ms, 100ms, 200ms, 500ms, 1s, 2s

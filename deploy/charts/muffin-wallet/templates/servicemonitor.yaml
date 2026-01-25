@@ -1,0 +1,17 @@
+{{- if .Values.metrics.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "muffin-wallet.fullname" . }}
+  labels:
+    {{- include "muffin-wallet.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "muffin-wallet.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+      path: {{ .Values.metrics.path }}
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+{{- end }}

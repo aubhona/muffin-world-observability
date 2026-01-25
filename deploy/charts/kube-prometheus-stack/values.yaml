@@ -1,0 +1,86 @@
+prometheus:
+  prometheusSpec:
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    
+    retention: 30d
+    retentionSize: "10GB"
+    
+    resources:
+      requests:
+        memory: 400Mi
+        cpu: 200m
+      limits:
+        memory: 2Gi
+        cpu: 1000m
+    
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 10Gi
+
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - prometheus.local
+    paths:
+      - /
+
+grafana:
+  enabled: true
+  adminPassword: admin
+  
+  ingress:
+    enabled: true
+    ingressClassName: nginx
+    hosts:
+      - grafana.local
+  
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: 'default'
+          orgId: 1
+          folder: ''
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+  
+  dashboards:
+    default:
+      spring-boot:
+        gnetId: 12900
+        revision: 1
+        datasource: Prometheus
+      jvm-micrometer:
+        gnetId: 4701
+        revision: 9
+        datasource: Prometheus
+      postgres:
+        gnetId: 9628
+        revision: 7
+        datasource: Prometheus
+  
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+
+alertmanager:
+  enabled: false
+
+nodeExporter:
+  enabled: true
+
+kubeStateMetrics:
+  enabled: true
+
+defaultRules:
+  create: false
