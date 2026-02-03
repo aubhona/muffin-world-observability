@@ -2,7 +2,9 @@ prometheus:
   prometheusSpec:
     serviceMonitorSelectorNilUsesHelmValues: false
     podMonitorSelectorNilUsesHelmValues: false
-    
+    serviceMonitorNamespaceSelector: {}
+    serviceMonitorSelector: {}
+
     retention: 30d
     retentionSize: "10GB"
     
@@ -39,6 +41,40 @@ grafana:
     ingressClassName: nginx
     hosts:
       - grafana.local
+  
+  additionalDataSources:
+    - name: Loki
+      uid: loki
+      type: loki
+      access: proxy
+      url: http://loki-stack:3100
+      jsonData:
+        maxLines: 1000
+        derivedFields:
+          - datasourceUid: tempo
+            matcherRegex: "(?:trace_?[iI]d|traceId)[\":\\s]*[\"']?([a-f0-9]{16,32})[\"']?"
+            name: TraceID
+            url: "$${__value.raw}"
+    - name: Tempo
+      uid: tempo
+      type: tempo
+      access: proxy
+      url: http://tempo:3100
+      jsonData:
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: '-1h'
+          spanEndTimeShift: '1h'
+          filterByTraceID: false
+          filterBySpanID: false
+          customQuery: true
+          query: '{namespace="default"} |~ "$${__trace.traceId}"'
+        lokiSearch:
+          datasourceUid: loki
+        serviceMap:
+          datasourceUid: prometheus
+        nodeGraph:
+          enabled: true
   
   dashboardProviders:
     dashboardproviders.yaml:

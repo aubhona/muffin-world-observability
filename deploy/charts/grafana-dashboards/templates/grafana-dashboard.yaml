@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: muffin-observability-dashboard
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  muffin-observability.json: |
+{{ .Files.Get "dashboards/muffin-observability.json" | indent 4 }}

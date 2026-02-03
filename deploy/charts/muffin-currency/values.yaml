@@ -1,9 +1,9 @@
 replicaCount: 2
 
 image:
-  repository: aadan1lov/muffin-currency
-  tag: "1.0.0"
-  pullPolicy: IfNotPresent
+  repository: aubhon/muffin-currency
+  tag: "1.1.2"
+  pullPolicy: Always
 
 service:
   type: ClusterIP
@@ -12,12 +12,15 @@ service:
 
 containerPort: 8080
 
+env:
+  ZIPKIN_ENDPOINT: http://tempo.monitoring.svc.cluster.local:9411/api/v2/spans
+
 probes:
   liveness:
-    path: /rate?from=PLAIN&to=CHOKOLATE
+    path: /healthz
     initialDelaySeconds: 5
     periodSeconds: 10
   readiness:
-    path: /rate?from=PLAIN&to=CHOKOLATE
+    path: /readyz
     initialDelaySeconds: 2
     periodSeconds: 5

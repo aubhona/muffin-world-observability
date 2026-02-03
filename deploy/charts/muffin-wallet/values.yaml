@@ -2,7 +2,7 @@ replicaCount: 2
 
 image:
   repository: aubhon/muffin-wallet
-  tag: "1.1.1"
+  tag: "1.1.2"
   pullPolicy: Always
 
 containerPort: 8081
@@ -33,7 +33,7 @@ applicationConfig:
       url: jdbc:postgresql://host.minikube.internal:5432/muffin_wallet
       username: muffin-wallet
   currencyService:
-    url: http://muffin-currency:8083/rate
+    url: muffin-currency:8083
 
 secret:
   SPRING_DATASOURCE_PASSWORD: muffin-wallet

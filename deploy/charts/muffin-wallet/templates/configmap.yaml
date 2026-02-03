@@ -10,11 +10,13 @@ data:
     server:
       port: {{ .Values.applicationConfig.server.port }}
     spring:
+      application:
+        name: muffin-wallet
       datasource:
         url: {{ .Values.applicationConfig.spring.datasource.url }}
         username: {{ .Values.applicationConfig.spring.datasource.username }}
-    currency:
-      service:
+    muffin:
+      currency:
         url: {{ .Values.applicationConfig.currencyService.url }}
     management:
       endpoints:
@@ -26,6 +28,12 @@ data:
           probes:
             enabled: true
           show-details: always
+      tracing:
+        sampling:
+          probability: 1.0
+      zipkin:
+        tracing:
+          endpoint: ${ZIPKIN_ENDPOINT:http://localhost:9411/api/v2/spans}
       metrics:
         distribution:
           percentiles-histogram:

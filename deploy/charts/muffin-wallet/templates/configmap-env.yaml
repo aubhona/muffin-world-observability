@@ -8,3 +8,4 @@ metadata:
 data:
   SERVER_PORT: "{{ .Values.containerPort }}"
   JDK_JAVA_OPTIONS: -Dspring.config.additional-location=/app/config/application.yaml
+  ZIPKIN_ENDPOINT: http://tempo.monitoring.svc.cluster.local:9411/api/v2/spans

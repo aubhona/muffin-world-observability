@@ -20,6 +20,13 @@ spec:
                   imagePullPolicy: {{ .Values.image.pullPolicy }}
                   ports:
                       - containerPort: {{ .Values.containerPort }}
+                  {{- if .Values.env }}
+                  env:
+                  {{- range $key, $value := .Values.env }}
+                    - name: {{ $key }}
+                      value: {{ $value | quote }}
+                  {{- end }}
+                  {{- end }}
                   livenessProbe:
                       httpGet:
                           path: {{ .Values.probes.liveness.path }}

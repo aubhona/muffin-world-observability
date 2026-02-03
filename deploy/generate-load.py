@@ -67,13 +67,15 @@ class LoadGenerator:
         except Exception:
             return False
     
-    async def create_transaction(self, session: aiohttp.ClientSession, from_wallet_id: str, to_wallet_id: str, amount: float) -> bool:
+    async def create_transaction(self, session: aiohttp.ClientSession, from_wallet_id: str, to_wallet_id: str, amount: float, from_currency: str, to_currency: str) -> bool:
         try:
             async with session.post(
                 f"{self.base_url}/v1/muffin-wallet/{from_wallet_id}/transaction",
                 json={
                     "to_muffin_wallet_id": to_wallet_id,
-                    "amount": amount
+                    "amount": amount,
+                    "from_currency": from_currency,
+                    "to_currency": to_currency
                 },
                 timeout=aiohttp.ClientTimeout(total=10)
             ) as response:
@@ -113,7 +115,7 @@ class LoadGenerator:
             
             amount = round(random.uniform(1, 1000), 2)
             
-            if await self.create_transaction(session, from_wallet, to_wallet, amount):
+            if await self.create_transaction(session, from_wallet, to_wallet, amount, from_type, to_type):
                 self.success_count += 1
             else:
                 self.error_count += 1
@@ -153,17 +155,17 @@ class LoadGenerator:
         wallet_pool_size = max(20, concurrent * 2) 
         print(f"Создаю пул из {wallet_pool_size} кошельков...")
         
-        wallet_types = ["CARAMEL", "CHOKOLATE"]
+        wallet_types = ["CARAMEL", "CHOKOLATE", "PLAIN"]
         
         async with aiohttp.ClientSession() as session:
             tasks = []
             for i in range(wallet_pool_size):
-                wallet_type = wallet_types[i % 2]
+                wallet_type = wallet_types[i % len(wallet_types)]
                 tasks.append(self.create_wallet(session, f"Load Test Wallet {i+1}", wallet_type))
             
             results = await asyncio.gather(*tasks)
             
-            self.wallets_by_type = {"CARAMEL": [], "CHOKOLATE": []}
+            self.wallets_by_type = {"CARAMEL": [], "CHOKOLATE": [], "PLAIN": []}
             for result in results:
                 if result is not None:
                     wallet_id, wallet_type = result

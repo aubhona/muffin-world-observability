@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "muffin-currency.fullname" . }}
+  labels:
+    app: {{ include "muffin-currency.name" . }}
+spec:
+  selector:
+    matchLabels:
+      app: {{ include "muffin-currency.name" . }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
+      scrapeTimeout: 10s

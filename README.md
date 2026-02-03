@@ -1,16 +1,20 @@
-# Muffin Wallet
+# Muffin World Observability
 
-Проект состоит из сервиса muffin-wallet (Spring Boot), muffin-currency (Golang), миграций БД на Liquibase и Helm-чартов для развёртывания в Kubernetes с мониторингом через Prometheus.
+Проект состоит из двух интегрированных микросервисов: muffin-wallet (Spring Boot) для управления кошельками и транзакциями, и muffin-currency (Golang) для конвертации валют. Включает миграции БД на Liquibase и Helm-чарты для развёртывания в Kubernetes. Реализован полный стек наблюдаемости: мониторинг через Prometheus, логирование через Loki и распределённый трейсинг через Tempo.
 
 ## Содержание
 
 - [Требования](#требования)
 - [Установка и запуск](#установка-и-запуск)
 - [Проверка работоспособности](#проверка-работоспособности)
+- [Проверка интеграции с muffin-currency](#проверка-интеграции-с-muffin-currency)
 - [Мониторинг с Prometheus](#мониторинг-с-prometheus)
 - [PromQL запросы](#promql-запросы)
 - [Тестирование метрик](#тестирование-метрик)
 - [Grafana](#grafana)
+- [Логирование с Loki](#логирование-с-loki)
+- [Трейсинг с Tempo](#трейсинг-с-tempo)
+- [Поиск логов по TraceID и уровню](#поиск-логов-по-traceid-и-уровню)
 - [Структура проекта](#структура-проекта)
 - [Откат релиза](#откат-релиза)
 - [Удаление](#удаление)
@@ -57,21 +61,25 @@ docker-compose up -d
 
 ### 4. Сборка образов
 
-Если нужно пересобрать образы:
+muffin-currency читает `ZIPKIN_ENDPOINT` из переменной окружения (для отправки трейсов в Tempo). muffin-wallet собран с зависимостями для трейсинга (Brave, Zipkin reporter, datasource-micrometer для БД). Без пересборки образов трейсы не будут собираться.
+
+Для локального тестирования в minikube:
 
 ```bash
-export REGISTRY=your-registry
-export VERSION=1.1.0
+cd muffin-currency
+eval $(minikube docker-env)
+docker build -t aubhon/muffin-currency:1.1.1 .
+cd ..
 
 cd muffin-wallet
-docker build -t $REGISTRY/muffin-wallet:$VERSION .
-docker push $REGISTRY/muffin-wallet:$VERSION
-
-docker build -f MigrationDockerfile -t $REGISTRY/muffin-wallet-migrations:$VERSION .
-docker push $REGISTRY/muffin-wallet-migrations:$VERSION
+./gradlew clean build -x test
+eval $(minikube docker-env)
+docker build -t aubhon/muffin-wallet:1.1.1 .
+docker build -f MigrationDockerfile -t aubhon/muffin-wallet-migrations:1.1.1 .
+cd ..
 ```
 
-Обновить `deploy/charts/muffin-wallet/values.yaml` с новыми значениями registry и tag.
+Для публикации в registry обновить tag и push, затем обновить `deploy/charts/muffin-wallet/values.yaml` и образ в чарте muffin-currency.
 
 ### 5. Развертывание через helmfile
 
@@ -82,11 +90,14 @@ helmfile apply
 ```
 
 Эта команда развернет:
-- kube-prometheus-stack в namespace monitoring
+- kube-prometheus-stack (Prometheus, Grafana, datasources Loki/Tempo) в namespace monitoring
+- loki-stack (Loki + Promtail) в namespace monitoring
+- tempo в namespace monitoring
+- grafana-dashboards (дашборд Muffin Observability) в namespace monitoring
 - muffin-currency в namespace default
 - muffin-wallet в namespace default
 
-Ожидайте 3-5 минут пока все поды запустятся.
+Ожидайте 5-7 минут пока все поды запустятся.
 
 ## Проверка работоспособности
 
@@ -105,7 +116,7 @@ kubectl get pods -n default
 kubectl get servicemonitor -n default
 ```
 
-Должен быть создан servicemonitor для muffin-wallet.
+Должны быть созданы servicemonitor для muffin-wallet и muffin-currency.
 
 ### Доступ к интерфейсам
 
@@ -119,7 +130,7 @@ kubectl get servicemonitor -n default
 
 ### Проверка в Prometheus UI
 
-Откройте http://prometheus.local и перейдите в Status -> Targets. Найдите target с именем `default/muffin-wallet/0`. Статус должен быть UP.
+Откройте http://prometheus.local и перейдите в Status -> Targets. Должны быть таргеты `default/muffin-wallet/0` и `default/muffin-currency/0`. Статус обоих — UP.
 
 Выполните простой запрос в Graph:
 
@@ -144,6 +155,25 @@ kubectl port-forward -n default svc/muffin-wallet 8081:80
 curl http://localhost:8081/actuator/prometheus
 ```
 
+### Проверка интеграции с muffin-currency
+
+muffin-wallet при переводе между разными валютами вызывает muffin-currency за курсом (endpoint `/rate?from=X&to=Y`), конвертация выполняется в памяти, схема БД не меняется. Валюты: CARAMEL, CHOKOLATE, PLAIN.
+
+Проверка:
+
+```bash
+# Создать два кошелька с разными валютами
+curl -X POST http://muffin-wallet.com/v1/muffin-wallets -H "Content-Type: application/json" -d '{"owner_name": "A", "type": "CARAMEL"}'
+curl -X POST http://muffin-wallet.com/v1/muffin-wallets -H "Content-Type: application/json" -d '{"owner_name": "B", "type": "CHOKOLATE"}'
+
+# Транзакция с конвертацией (подставить id из ответов)
+curl -X POST http://muffin-wallet.com/v1/muffin-wallet/<FROM_ID>/transaction \
+  -H "Content-Type: application/json" \
+  -d '{"to_muffin_wallet_id": "<TO_ID>", "amount": 100, "from_currency": "CARAMEL", "to_currency": "CHOKOLATE"}'
+```
+
+В логах muffin-wallet будут вызовы currency, в логах muffin-currency — обработка `/rate`. В Tempo (Grafana Explore -> Tempo -> Search) видна цепочка: POST transaction (wallet) -> GET /rate (currency).
+
 ## Мониторинг с Prometheus
 
 ### Архитектура
@@ -155,7 +185,7 @@ curl http://localhost:8081/actuator/prometheus
 - Node Exporter для метрик узлов Kubernetes
 - Kube State Metrics для метрик объектов Kubernetes
 
-Метрики приложения собираются через ServiceMonitor, который автоматически настраивает Prometheus на сбор метрик с endpoint /actuator/prometheus.
+Метрики приложений собираются через ServiceMonitor: muffin-wallet — с /actuator/prometheus, muffin-currency — с /metrics. В values kube-prometheus-stack заданы serviceMonitorSelector и serviceMonitorNamespaceSelector так, чтобы подхватывались ServiceMonitor из namespace default.
 
 ### Сбор метрик
 
@@ -269,7 +299,7 @@ pip install aiohttp
 - `--sleep` - задержка между пакетами запросов
 - `--concurrent` - количество одновременных запросов (по умолчанию 10)
 
-Скрипт создаст кошельки и выполнит серию запросов к API.  
+Скрипт создаёт кошельки трёх валют (CARAMEL, CHOKOLATE, PLAIN) и выполняет транзакции с конвертацией — при разных валютах вызывается muffin-currency за курсом.  
 После завершения подождите 1-2 минуты и проверьте метрики в Prometheus.  
 На период работы скрипта RPS должен подняться ~ на значение requests/sleep, и упасть после завершения скрипта. 
 Аналогичный график должен быть Log errors rate, причём он должен совпадать с метрикой RPS GET /**, т.к. эта метрика пишется,если был вызван несуществующий endpoint, и как раз в этом случае и пишется error лог.  
@@ -298,12 +328,12 @@ curl http://muffin-wallet.com/v1/muffin-wallets
 curl http://muffin-wallet.com/v1/muffin-wallet/{id}
 ```
 
-Выполнить транзакцию:
+Выполнить транзакцию (с конвертацией — указать from_currency и to_currency):
 
 ```bash
 curl -X POST http://muffin-wallet.com/v1/muffin-wallet/{from_id}/transaction \
   -H "Content-Type: application/json" \
-  -d '{"to_muffin_wallet_id": "{to_id}", "amount": 100.50}'
+  -d '{"to_muffin_wallet_id": "{to_id}", "amount": 100.50, "from_currency": "CARAMEL", "to_currency": "CHOKOLATE"}'
 ```
 
 Сгенерировать ошибки для тестирования метрик:
@@ -316,41 +346,88 @@ curl http://muffin-wallet.com/v1/nonexistent
 
 Grafana доступна по адресу http://grafana.local (логин: admin, пароль: admin).
 
-Предустановленные дашборды:
-- **muffin-wallet metrics** - основной дашборд с панелями для всех требуемых заданием метрик (создается автоматически при деплое)
-- Java SpringBoot APM
-- JVM (Micrometer)
+Дополнительные datasource (настроены в kube-prometheus-stack): Loki для логов, Tempo для трейсов. Связь логов и трейсов по traceId включена (из лога можно перейти к трейсу, из трейса — к логам).
 
-Дашборд "muffin-wallet metrics" автоматически создается через ConfigMap с label `grafana_dashboard: "1"`. Grafana sidecar автоматически подхватывает дашборды из таких ConfigMap.
+Дашборды:
+- **Muffin Observability** — общий дашборд (chart grafana-dashboards): метрики muffin-wallet и muffin-currency, логи Loki, трейсы Tempo. Подхватывается sidecar по label `grafana_dashboard: "1"`.
+- Java SpringBoot APM, JVM (Micrometer), Postgres — из kube-prometheus-stack.
 
-Панели в дашборде:
-1. **RPS by method + uri** - количество запросов в секунду по методам
-2. **Log errors rate** - количество ошибок в логах
-3. **HTTP latency p99** - 99-й персентиль времени ответа
-4. **DB connections (HikariCP)** - активные соединения к БД
+В дашборде Muffin Observability: RPS по методам/URI, Log errors rate, HTTP latency p99, DB connections (HikariCP), панели логов и трейсов. Трейсы удобнее смотреть в Explore -> Tempo -> Search.
 
-После развертывания дашборд появится автоматически в списке дашбордов Grafana.
+После развертывания дашборды появятся автоматически в списке дашбордов Grafana.
+
+## Логирование с Loki
+
+Loki и Promtail развёрнуты в namespace monitoring (loki-stack). Promtail собирает логи из подов кластера и отправляет в Loki. Парсинг — в запросах LogQL: для muffin-currency используется `| json`, для muffin-wallet — `| regexp` по формату лога.
+
+Примеры запросов в Grafana Explore (datasource Loki):
+
+```logql
+{container="muffin-wallet"}
+{container="muffin-currency"} | json
+{container="muffin-currency"} | json | level="ERROR"
+{container="muffin-currency"} | json | trace_id="<id>"
+{container="muffin-wallet"} | regexp `\[muffin-wallet,(?P<traceId>[^,]+),` | traceId="<id>"
+```
+
+Loki настроен с retention 30 дней, 10GB (в values loki-stack).
+
+## Трейсинг с Tempo
+
+Tempo развёрнут в namespace monitoring. Оба приложения отправляют трейсы по протоколу Zipkin (порт 9411). muffin-wallet: Micrometer Tracing (Brave), Zipkin reporter, datasource-micrometer для трейсинга обращений к БД. muffin-currency: переменная окружения ZIPKIN_ENDPOINT (в кластере указывается на tempo.monitoring.svc:9411).
+
+Просмотр: Grafana -> Explore -> выбрать datasource Tempo -> Search -> Run query. Можно фильтровать по service name (muffin-wallet, muffin-currency). В трейсе видна цепочка вызовов. В настройках datasource Tempo включена связь с Loki (traces to logs).
+
+Tempo настроен с retention 30 дней, 10GB.
+
+## Поиск логов по TraceID и уровню
+
+TraceID в логах muffin-wallet — в квадратных скобках: `[muffin-wallet,<traceId>,<spanId>]`. В muffin-currency — в JSON поле `trace_id`. Уровень в muffin-currency: поле `level` в JSON; в muffin-wallet — парсинг через regexp.
+
+По TraceID (muffin-currency): `{container="muffin-currency"} | json | trace_id="YOUR_TRACE_ID"`
+
+По TraceID (muffin-wallet): `{container="muffin-wallet"} | regexp \`\[muffin-wallet,(?P<traceId>[^,]+),\` | traceId="YOUR_TRACE_ID"`
+
+По уровню ERROR (muffin-currency): `{container="muffin-currency"} | json | level="ERROR"`
+
+По уровню ERROR (muffin-wallet): `{container="muffin-wallet"} | regexp \`\s(?P<level>\w+)\s\` | level="ERROR"`
+
+TraceID для подстановки можно скопировать из Tempo: открыть трейс в Explore -> Tempo, скопировать traceId из атрибутов.
 
 ## Структура проекта
 
 ```
-hw5/
+hw6/
 ├── README.md
-├── muffin-wallet/               
-├── muffin-currency/             
+├── muffin-wallet/               # Spring Boot
+├── muffin-currency/             # Go
 └── deploy/
     ├── helmfile.yaml            # Оркестрация развертывания
-    ├── generate-load.py         # Скрипт генерации нагрузки (python)
+    ├── generate-load.py         # Скрипт генерации нагрузки (с конвертацией валют)
     └── charts/
         ├── kube-prometheus-stack/
-        │   └── values.yaml      # Конфигурация Prometheus Operator
+        │   └── values.yaml      # Prometheus, Grafana, datasources Loki/Tempo
+        ├── loki-stack/
+        │   └── values.yaml      # Loki + Promtail
+        ├── tempo/
+        │   └── values.yaml      # Tempo для трейсов
+        ├── grafana-dashboards/
+        │   └── dashboards/      # Дашборд Muffin Observability (метрики, логи, трейсы)
         ├── muffin-wallet/
-        │   ├── values.yaml      # Конфигурация приложения
+        │   ├── values.yaml
         │   └── templates/
-        │       ├── servicemonitor.yaml    # Сбор метрик
-        │       ├── grafana-dashboard.yaml # Кастомный дашборд
-        │       └── service.yaml           # Service
+        │       ├── servicemonitor.yaml, service.yaml, deployment.yaml
+        │       ├── configmap.yaml, configmap-env.yaml, secret.yaml
+        │       ├── db-migration-job.yaml, db-migration-rollback-job.yaml
+        │       └── ingress.yaml
         └── muffin-currency/
+            ├── values.yaml
+            └── templates/
+                ├── servicemonitor.yaml
+                ├── service.yaml
+                ├── deployment.yaml
+                ├── _helpers.tpl
+                └── tests/
 ```
 
 ## Откат релиза
